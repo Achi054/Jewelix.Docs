@@ -3,7 +3,7 @@
   Sync local WIKI.md into the GitHub built-in wiki for Achi054/Jewelix.Docs.
 
 .DESCRIPTION
-  Clones the repository wiki (Jewelix.Docs.wiki.git), copies WIKI.md to Home.md,
+  Clones the repository wiki (Jewelix.Docs.wiki.git), copies WIKI.md to Jewelix-wikipedia.md,
   commits and pushes the change. Uses GITHUB_TOKEN for non-interactive push.
 
 .PARAMETER DryRun
@@ -67,7 +67,7 @@ $possiblePaths += @(
 )
 
 # Git settings
-$CommitMessage = "Sync WIKI.md -> Home.md (automated)"
+$CommitMessage = "Sync WIKI.md -> Jewelix-wikipedia.md (automated)"
 $GitUserName = $env:GIT_USER_NAME ?? $env:GITHUB_USER ?? 'jewelix-wiki-sync'
 $GitUserEmail = $env:GIT_USER_EMAIL ?? "$GitUserName@users.noreply.github.com"
 
@@ -192,10 +192,10 @@ catch {
 }
 
 # -----------------------
-# Copy WIKI.md to Home.md
+# Copy WIKI.md to Jewelix-wikipedia.md
 # -----------------------
-Write-Title "Copying WIKI.md to Home.md"
-$HomeMdPath = Join-Path -Path $LocalTempDir -ChildPath 'Home.md'
+Write-Title "Copying WIKI.md to Jewelix-wikipedia.md"
+$HomeMdPath = Join-Path -Path $LocalTempDir -ChildPath 'Jewelix-wikipedia.md'
 
 try {
     Copy-Item -Path $WikiFilePath -Destination $HomeMdPath -Force
@@ -231,9 +231,9 @@ try {
             exit 0
         }
 
-        Run-Git @("add", "--", "Home.md") | Out-Null
+        Run-Git @("add", "--", "Jewelix-wikipedia.md") | Out-Null
         Run-Git @("commit", "-m", $CommitMessage) | Out-Null
-        Write-Success "Committed Home.md"
+        Write-Success "Committed Jewelix-wikipedia.md"
     }
     finally {
         Pop-Location
