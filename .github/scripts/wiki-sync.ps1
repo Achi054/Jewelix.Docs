@@ -269,12 +269,12 @@ function Update-WikiPage {
         }
         else {
             $error = $json.error.info ?? $json.edit.result
-            Write-Error-Custom "Failed to update page: $error"
+            Write-ErrorCustom "Failed to update page: $error"
             exit 1
         }
     }
     catch {
-        Write-Error-Custom "Error updating Wikipedia page: $_"
+        Write-ErrorCustom "Error updating Wikipedia page: $_"
         exit 1
     }
 }
@@ -308,7 +308,7 @@ function Invoke-WikiLogin {
         $loginToken = $tokenJson.query.tokens.logintoken
         
         if (-not $loginToken) {
-            Write-Error-Custom "Failed to retrieve login token"
+            Write-ErrorCustom "Failed to retrieve login token"
             exit 1
         }
         
@@ -338,12 +338,12 @@ function Invoke-WikiLogin {
         }
         else {
             $message = $loginJson.clientlogin.message ?? "Unknown error"
-            Write-Error-Custom "Login failed: $message"
+            Write-ErrorCustom "Login failed: $message"
             exit 1
         }
     }
     catch {
-        Write-Error-Custom "Authentication error: $_"
+        Write-ErrorCustom "Authentication error: $_"
         exit 1
     }
 }
@@ -365,7 +365,7 @@ function Main {
         Write-Success "Read $(($wikiContent | Measure-Object -Character).Characters) characters"
     }
     catch {
-        Write-Error-Custom "Error reading WIKI.md: $_"
+        Write-ErrorCustom "Error reading WIKI.md: $_"
         exit 1
     }
     
@@ -398,7 +398,7 @@ function Main {
 # ============================================================================
 
 trap {
-    Write-Error-Custom "Fatal error: $_"
+    Write-ErrorCustom "Fatal error: $_"
     exit 1
 }
 
