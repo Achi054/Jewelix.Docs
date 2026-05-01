@@ -1,4 +1,4 @@
-name: 🔄 Sync Wiki to Wikipedia
+name: 🔄 Sync Wiki to GitHub Wiki
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   sync-wiki:
     runs-on: ubuntu-latest
-    name: 📖 Update Wikipedia Page
+    name: 📖 Update GitHub Wiki Page
 
     steps:
       - name: 📥 Checkout code
@@ -24,24 +24,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: � Set up PowerShell Core
-        shell: pwsh
-        run: |
-          Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
-          Write-Host "OS: $($PSVersionTable.OS)"
-
-      - name: 🔄 Sync WIKI.md to Wikipedia
+      - name: 🔄 Sync WIKI.md to GitHub Wiki
         shell: pwsh
         env:
-          WIKI_USERNAME: ${{ secrets.WIKI_USERNAME }}
-          WIKI_PASSWORD: ${{ secrets.WIKI_PASSWORD }}
-          WIKI_PAGE_TITLE: Jewelix
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Make the script executable and run it
           $scriptPath = Join-Path '.github' 'scripts' 'wiki-sync.ps1'
           & $scriptPath
 
       - name: ✅ Log sync completion
         if: success()
-        run: echo "✅ Wikipedia page updated successfully!"
-
+        run: echo "✅ GitHub Wiki page updated successfully!"
