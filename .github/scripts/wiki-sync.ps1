@@ -3,7 +3,8 @@
   Sync local WIKI.md into the GitHub built-in wiki for Achi054/Jewelix.Docs.
 
 .DESCRIPTION
-  Clones the repository wiki (Jewelix.Docs.wiki.git), copies WIKI.md to Jewelix-wikipedia.md,
+  Clones the repository wiki (Jewelix.Docs.wiki.git), copies WIKI.md to
+  Jewelix-wikipedia.md (which maps to the wiki page at /wiki/Jewelix-wikipedia),
   commits and pushes the change. Uses GITHUB_TOKEN for non-interactive push.
 
 .PARAMETER DryRun
@@ -67,7 +68,10 @@ $possiblePaths += @(
 )
 
 # Git settings
-$CommitMessage = "Sync WIKI.md -> Jewelix-wikipedia.md (automated)"
+# GitHub wiki page filenames map directly to URLs:
+# Jewelix-wikipedia.md  -->  /wiki/Jewelix-wikipedia
+$WikiPageFileName = 'Jewelix-wikipedia.md'
+$CommitMessage = "Sync WIKI.md -> $WikiPageFileName (automated)"
 $GitUserName = $env:GIT_USER_NAME ?? $env:GITHUB_USER ?? 'jewelix-wiki-sync'
 $GitUserEmail = $env:GIT_USER_EMAIL ?? "$GitUserName@users.noreply.github.com"
 
@@ -192,14 +196,14 @@ catch {
 }
 
 # -----------------------
-# Copy WIKI.md to Jewelix-wikipedia.md
+# Copy WIKI.md to Home.md
 # -----------------------
-Write-Title "Copying WIKI.md to Jewelix-wikipedia.md"
-$HomeMdPath = Join-Path -Path $LocalTempDir -ChildPath 'Jewelix-wikipedia.md'
+Write-Title "Copying WIKI.md to $WikiPageFileName"
+$WikiPagePath = Join-Path -Path $LocalTempDir -ChildPath $WikiPageFileName
 
 try {
-    Copy-Item -Path $WikiFilePath -Destination $HomeMdPath -Force
-    Write-Success "Copied to $HomeMdPath"
+    Copy-Item -Path $WikiFilePath -Destination $WikiPagePath -Force
+    Write-Success "Copied to $WikiPagePath"
 }
 catch {
     Write-ErrorCustom "Failed to copy WIKI.md: $_"
@@ -231,9 +235,9 @@ try {
             exit 0
         }
 
-        Run-Git @("add", "--", "Jewelix-wikipedia.md") | Out-Null
+        Run-Git @("add", "--", $WikiPageFileName) | Out-Null
         Run-Git @("commit", "-m", $CommitMessage) | Out-Null
-        Write-Success "Committed Jewelix-wikipedia.md"
+        Write-Success "Committed Home.md"
     }
     finally {
         Pop-Location
