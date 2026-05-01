@@ -126,7 +126,7 @@ npm run localize       # Extract i18n strings
 📍 **Location**: `/Jewelix.Identity`
 
 **Tech Stack**:
-- 🎯 C# / .NET (ASP.NET Core)
+- 🎯 C# / .NET v10.0 (ASP.NET Core)
 - 🏛️ Clean Architecture pattern
 - 🗄️ Domain-driven design
 - ✅ Comprehensive test suite
@@ -159,7 +159,7 @@ test/                  # Unit and integration tests
 📍 **Location**: `/Library.Jewelix.Core`
 
 **Tech Stack**:
-- 🎯 C# / .NET
+- 🎯 C# / .NET v10.0
 - 📚 Reusable utility libraries
 - 🔧 Common infrastructure patterns
 
@@ -187,7 +187,7 @@ Provides shared infrastructure used by both Jewelix.Identity and future API serv
 ### Backend
 | Technology | Purpose |
 |------------|---------|
-| **.NET / C#** | Core runtime |
+| **.NET / C# v10.0** | Core runtime |
 | **ASP.NET Core** | Web API framework |
 | **Entity Framework** | Data access |
 | **xUnit / NUnit** | Testing framework |
@@ -212,7 +212,7 @@ Provides shared infrastructure used by both Jewelix.Identity and future API serv
 - Angular CLI
 
 **For Backend Development**:
-- .NET SDK (for Jewelix.Identity and Library.Jewelix.Core)
+- .NET SDK v10.0 (for Jewelix.Identity and Library.Jewelix.Core)
 - Visual Studio 2022 or VS Code with C# extensions
 - Git
 
