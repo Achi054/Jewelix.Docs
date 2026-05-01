@@ -45,18 +45,41 @@ This folder contains branding and design assets, including:
 
 These assets should be used consistently across all Jewelix project materials and documentation.
 
+## � Documentation & Wiki
+
+### Quick Access
+- 🌐 **[Complete Project Wiki](./WIKI.md)** - Comprehensive guide to all Jewelix repositories, tech stack, and development guides
+- 🔗 **[Interactive Architecture Diagram](https://lucid.app/lucidchart/2a9b4982-61da-4f12-96d9-3d708875fb5a/edit)** - Visual system design overview
+
+### Wiki Synchronization
+- 🤖 **PowerShell-based CI/CD workflow** - Automatically syncs `WIKI.md` to Wikipedia Jewelix page
+- ⚙️ Triggers on every commit to `WIKI.md` on main/master branches
+- 📝 No manual steps required - changes are automatically published to Wikipedia
+
 ## 🚀 Getting Started
 
 - 🎨 For branding and visual identity, refer to the files in `artifacts/images/`
 - 🏗️ For architectural information and system design, check `artifacts/architecture/`
 - 🎯 Review the color palette to maintain visual consistency across all Jewelix materials
+- 📖 For complete project information, visit the [Project Wiki](./WIKI.md)
 
 ## 🤝 Contributing
 
 When adding new documentation or assets:
 1. 🏗️ Place architectural diagrams in `artifacts/architecture/`
 2. 🖼️ Place images and branding assets in `artifacts/images/`
-3. 📝 Update this README if new categories or resources are added
+3. 📝 Update `WIKI.md` for major documentation changes
+4. ✅ The wiki will automatically sync to Wikipedia on commit
+
+## 🔧 Automation & CI/CD
+
+This repository includes automated workflows:
+
+### 🌐 Wiki Synchronization (PowerShell-based)
+- **Workflow**: Automatically syncs `WIKI.md` to Wikipedia Jewelix page
+- **Trigger**: On every push to `WIKI.md` (main/master branch)
+- **Technology**: GitHub Actions + PowerShell Core
+- **Configuration**: Requires `WIKI_USERNAME` and `WIKI_PASSWORD` GitHub Secrets
 
 ---
 

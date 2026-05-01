@@ -1,0 +1,58 @@
+name: 🔄 Sync Wiki to Wikipedia
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'WIKI.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    name: 📖 Update Wikipedia Page
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: � Set up PowerShell Core
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
+          Write-Host "OS: $($PSVersionTable.OS)"
+
+      - name: 🔄 Sync WIKI.md to Wikipedia
+        shell: pwsh
+        env:
+          WIKI_USERNAME: ${{ secrets.WIKI_USERNAME }}
+          WIKI_PASSWORD: ${{ secrets.WIKI_PASSWORD }}
+          WIKI_PAGE_TITLE: Jewelix
+        run: |
+          # Make the script executable and run it
+          $scriptPath = Join-Path '.github' 'scripts' 'wiki-sync.ps1'
+          & $scriptPath
+
+      - name: ✅ Log sync completion
+        if: success()
+        run: echo "✅ Wikipedia page updated successfully!"
+
+      - name: 📧 Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ Failed to sync WIKI.md to Wikipedia. Check the workflow logs for details.'
+            })
+
