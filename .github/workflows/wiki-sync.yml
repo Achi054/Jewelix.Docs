@@ -44,15 +44,3 @@ jobs:
         if: success()
         run: echo "✅ Wikipedia page updated successfully!"
 
-      - name: 📧 Notify on failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '❌ Failed to sync WIKI.md to Wikipedia. Check the workflow logs for details.'
-            })
-

@@ -8,13 +8,6 @@
 
 .PARAMETER DryRun
   If set, shows actions without performing git push.
-
-.EXAMPLE
-  # Run normally
-  pwsh ./sync-wiki-from-wiki-md.ps1
-
-  # Dry run
-  pwsh ./sync-wiki-from-wiki-md.ps1 -DryRun
 #>
 
 param(
@@ -32,11 +25,32 @@ $GitHubOwner = 'Achi054'
 $RepoName = 'Jewelix.Docs'
 $WikiRepoName = "$RepoName.wiki.git"
 $WikiRemoteHttps = "https://github.com/$GitHubOwner/$WikiRepoName"
-$LocalTempDir = Join-Path -Path $env:TEMP -ChildPath ("jewelix-wiki-sync-{0}" -f ([guid]::NewGuid().ToString()))
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommandPath
 
-# Path to source WIKI.md (adjust if needed)
-$WikiFilePath = Join-Path -Path $ScriptDir -ChildPath 'WIKI.md'
+# Robust temp root: prefer runner-provided vars, fallback to /tmp
+$TempRoot = $env:TEMP ?? $env:RUNNER_TEMP ?? $env:GITHUB_WORKSPACE ?? '/tmp'
+
+# Robust script directory: prefer PSScriptRoot, then MyInvocation, then current location
+if ($PSBoundParameters.ContainsKey('PSScriptRoot')) {
+    $ScriptDir = $PSScriptRoot
+}
+elseif ($PSScriptRoot) {
+    $ScriptDir = $PSScriptRoot
+}
+elseif ($MyInvocation -and $MyInvocation.MyCommandPath) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommandPath
+}
+else {
+    $ScriptDir = (Get-Location).Path
+}
+
+$LocalTempDir = Join-Path -Path $TempRoot -ChildPath ("jewelix-wiki-sync-{0}" -f ([guid]::NewGuid().ToString()))
+
+# Path to source WIKI.md (try script dir, then workspace root)
+$WikiFilePathCandidates = @(
+    Join-Path -Path $ScriptDir -ChildPath 'WIKI.md',
+    Join-Path -Path $ScriptDir -ChildPath '..\WIKI.md',
+    Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath 'WIKI.md'
+) | ForEach-Object { (Resolve-Path -Path $_ -ErrorAction SilentlyContinue).Path } | Where-Object { $_ }
 
 # Git settings
 $CommitMessage = "Sync WIKI.md → Home.md (automated)"
@@ -84,7 +98,7 @@ function Run-Git([string[]]$args) {
     $stderr = $proc.StandardError.ReadToEnd()
     $proc.WaitForExit()
     if ($proc.ExitCode -ne 0) {
-        throw "git failed: $stderr"
+        throw "git failed (exit $($proc.ExitCode)): $stderr"
     }
     return $stdout.Trim()
 }
@@ -94,12 +108,13 @@ function Run-Git([string[]]$args) {
 # -----------------------
 Write-Title "Jewelix Wiki Sync - Validation"
 
-if (-not (Test-Path $WikiFilePath)) {
-    Write-ErrorCustom "WIKI.md not found at path: $WikiFilePath"
+if (-not $WikiFilePathCandidates -or $WikiFilePathCandidates.Count -eq 0) {
+    Write-ErrorCustom "WIKI.md not found. Checked: $ScriptDir and GITHUB_WORKSPACE. Provide WIKI.md or set correct path."
     exit 1
 }
 else {
-    Write-Info "Found WIKI.md at: $WikiFilePath"
+    $WikiFilePath = $WikiFilePathCandidates[0]
+    Write-Info "Using WIKI.md at: $WikiFilePath"
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -196,7 +211,7 @@ catch {
 }
 
 # -----------------------
-# Push changes
+# Determine default branch and push
 # -----------------------
 if ($DryRun) {
     Write-Warn "DryRun enabled — skipping git push."
@@ -207,9 +222,18 @@ if ($DryRun) {
 
 Write-Title "Pushing to remote"
 try {
-    # If token was embedded in clone URL, remote origin already has token; otherwise use normal push
-    Run-Git @("push", "origin", "HEAD:main") | Out-Null
-    Write-Success "Pushed changes to wiki remote (origin main)."
+    # detect remote default branch (if possible)
+    $remoteInfo = Run-Git @("remote", "show", "origin")
+    $match = ($remoteInfo -split "`n" | Where-Object { $_ -match 'HEAD branch:' }) -join ''
+    if ($match -and $match -match 'HEAD branch:\s*(\S+)') {
+        $defaultBranch = $matches[1]
+    }
+    else {
+        $defaultBranch = 'main'
+    }
+
+    Run-Git @("push", "origin", "HEAD:$defaultBranch") | Out-Null
+    Write-Success "Pushed changes to wiki remote (origin $defaultBranch)."
 }
 catch {
     Write-ErrorCustom "Git push failed: $_"
