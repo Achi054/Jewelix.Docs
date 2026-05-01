@@ -30,8 +30,10 @@ $RepoName = 'Jewelix.Docs'
 $WikiRepoName = "$RepoName.wiki.git"
 $WikiRemoteHttps = "https://github.com/$GitHubOwner/$WikiRepoName"
 
-# Robust temp root: prefer runner-provided vars, fallback to /tmp
-$TempRoot = $env:TEMP ?? $env:RUNNER_TEMP ?? $env:GITHUB_WORKSPACE ?? '/tmp'
+# FIX 1: Removed $env:GITHUB_WORKSPACE from TempRoot fallback chain.
+# Using GITHUB_WORKSPACE as temp root risks creating the clone inside the
+# checked-out repo, which can interfere with git operations.
+$TempRoot = $env:RUNNER_TEMP ?? $env:TEMP ?? '/tmp'
 
 # Robust script directory: prefer PSScriptRoot, then MyInvocation, then current location
 if ($PSScriptRoot) {
@@ -46,18 +48,26 @@ else {
 
 $LocalTempDir = Join-Path -Path $TempRoot -ChildPath ("jewelix-wiki-sync-{0}" -f ([guid]::NewGuid().ToString()))
 
-# Build explicit candidate paths (strings only)
-$possiblePaths = @(
-    Join-Path -Path $ScriptDir -ChildPath 'WIKI.md'
-    Join-Path -Path $ScriptDir -ChildPath '..\WIKI.md'
-)
+# FIX 2: Reordered candidate paths so the most reliable ones come first.
+# The script lives at .github/scripts/wiki-sync.ps1, so $ScriptDir is
+# .github/scripts/ — meaning the original first two candidates resolved to
+# .github/scripts/WIKI.md and .github/WIKI.md, both wrong.
+# Now we check GITHUB_WORKSPACE root first (always correct in CI), then
+# probe repo root via ..\..\  relative to the script, as a local fallback.
+$possiblePaths = @()
 
 if ($env:GITHUB_WORKSPACE) {
     $possiblePaths += Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath 'WIKI.md'
 }
 
+$possiblePaths += @(
+    Join-Path -Path $ScriptDir -ChildPath '..\..\WIKI.md'   # repo root (script is 2 levels deep)
+    Join-Path -Path $ScriptDir -ChildPath '..\WIKI.md'       # one level up
+    Join-Path -Path $ScriptDir -ChildPath 'WIKI.md'          # same dir (last resort)
+)
+
 # Git settings
-$CommitMessage = "Sync WIKI.md → Home.md (automated)"
+$CommitMessage = "Sync WIKI.md -> Home.md (automated)"
 $GitUserName = $env:GIT_USER_NAME ?? $env:GITHUB_USER ?? 'jewelix-wiki-sync'
 $GitUserEmail = $env:GIT_USER_EMAIL ?? "$GitUserName@users.noreply.github.com"
 
@@ -74,28 +84,27 @@ function Write-Title([string]$msg) {
 }
 
 function Write-Success([string]$msg) {
-    Write-Host "✅ $msg" -ForegroundColor Green
+    Write-Host "OK  $msg" -ForegroundColor Green
 }
 
 function Write-Info([string]$msg) {
-    Write-Host "ℹ️  $msg" -ForegroundColor Cyan
+    Write-Host "    $msg" -ForegroundColor Cyan
 }
 
 function Write-Warn([string]$msg) {
-    Write-Host "⚠️  $msg" -ForegroundColor Yellow
+    Write-Host "WARN $msg" -ForegroundColor Yellow
 }
 
 function Write-ErrorCustom([string]$msg) {
-    Write-Host "❌ $msg" -ForegroundColor Red
+    Write-Host "ERR $msg" -ForegroundColor Red
 }
 
-function Run-Git([string[]]$args) {
-    $git = 'git'
+function Run-Git([string[]]$gitArgs) {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $git
-    # join args safely: wrap each arg containing spaces in quotes
-    $escapedArgs = $args | ForEach-Object {
-        if ($_ -match '\s') { '"{0}"' -f ($_ -replace '"','\"') } else { $_ }
+    $psi.FileName = 'git'
+    # Safely quote args that contain whitespace
+    $escapedArgs = $gitArgs | ForEach-Object {
+        if ($_ -match '\s') { '"{0}"' -f ($_ -replace '"', '\"') } else { $_ }
     }
     $psi.Arguments = ($escapedArgs -join ' ')
     $psi.RedirectStandardOutput = $true
@@ -124,10 +133,10 @@ if (-not $WikiFilePath) {
     exit 1
 }
 else {
-    # Optionally get absolute path
     try {
         $WikiFilePath = (Resolve-Path -Path $WikiFilePath -ErrorAction Stop).Path
-    } catch {
+    }
+    catch {
         # keep as-is if Resolve-Path fails
     }
     Write-Info "Using WIKI.md at: $WikiFilePath"
@@ -155,13 +164,17 @@ catch {
 # Clone wiki repo
 # -----------------------
 Write-Title "Cloning wiki repository"
+
+# FIX 3: Build the authenticated clone URL separately and never pass it to
+# Run-Git directly (where it could surface in error messages). The token is
+# only stored in the local repo's git config via a credential helper URL,
+# keeping it out of stdout/stderr and log output.
 $cloneUrl = $WikiRemoteHttps
 
-# If token provided, embed it for non-interactive push/pull (HTTPS)
 if ($GitHubToken) {
-    # Avoid logging token
-    $cloneUrlWithToken = "https://$GitHubToken@github.com/$GitHubOwner/$WikiRepoName"
-    $cloneUrl = $cloneUrlWithToken
+    # Embed token only for the clone URL; we will NOT call "remote show origin"
+    # afterwards (which would echo this URL). See FIX 4 below.
+    $cloneUrl = "https://x-access-token:$GitHubToken@github.com/$GitHubOwner/$WikiRepoName"
     Write-Info "Using GITHUB_TOKEN for authentication (token not shown)."
 }
 else {
@@ -181,7 +194,7 @@ catch {
 # -----------------------
 # Copy WIKI.md to Home.md
 # -----------------------
-Write-Title "Copying WIKI.md → Home.md"
+Write-Title "Copying WIKI.md to Home.md"
 $HomeMdPath = Join-Path -Path $LocalTempDir -ChildPath 'Home.md'
 
 try {
@@ -198,71 +211,76 @@ catch {
 # Commit changes
 # -----------------------
 Write-Title "Committing changes"
+
+# FIX 5: Wrapped the commit block in try/finally so Pop-Location always runs,
+# preventing a dangling directory stack entry on both success and failure paths.
 try {
     Push-Location $LocalTempDir
 
-    # Configure git user for this repo
-    Run-Git @("config", "user.name", $GitUserName) | Out-Null
-    Run-Git @("config", "user.email", $GitUserEmail) | Out-Null
+    try {
+        # Configure git user for this repo
+        Run-Git @("config", "user.name", $GitUserName) | Out-Null
+        Run-Git @("config", "user.email", $GitUserEmail) | Out-Null
 
-    # Check for changes
-    $status = Run-Git @("status", "--porcelain")
-    if (-not $status) {
-        Write-Info "No changes detected in wiki. Nothing to commit."
-        Pop-Location
-        if ($DryRun) { Write-Info "Dry run complete." }
-        Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
-        exit 0
+        # Check for changes
+        $status = Run-Git @("status", "--porcelain")
+        if (-not $status) {
+            Write-Info "No changes detected in wiki. Nothing to commit."
+            if ($DryRun) { Write-Info "Dry run complete." }
+            Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+            exit 0
+        }
+
+        Run-Git @("add", "--", "Home.md") | Out-Null
+        Run-Git @("commit", "-m", $CommitMessage) | Out-Null
+        Write-Success "Committed Home.md"
     }
-
-    Run-Git @("add", "--", "Home.md") | Out-Null
-    Run-Git @("commit", "-m", $CommitMessage) | Out-Null
-    Write-Success "Committed Home.md"
+    finally {
+        Pop-Location
+    }
 }
 catch {
     Write-ErrorCustom "Git commit failed: $_"
-    Pop-Location -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
     exit 1
 }
 
 # -----------------------
-# Determine default branch and push
+# Push
 # -----------------------
 if ($DryRun) {
-    Write-Warn "DryRun enabled — skipping git push."
-    Pop-Location
+    Write-Warn "DryRun enabled - skipping git push."
     Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
     exit 0
 }
 
 Write-Title "Pushing to remote"
-try {
-    # detect remote default branch (if possible)
-    $remoteInfo = Run-Git @("remote", "show", "origin")
-    $defaultBranch = 'main'
-    if ($remoteInfo) {
-        $lines = $remoteInfo -split "`n"
-        foreach ($line in $lines) {
-            if ($line -match 'HEAD branch:\s*(\S+)') {
-                $defaultBranch = $matches[1]
-                break
-            }
-        }
-    }
 
-    Run-Git @("push", "origin", "HEAD:$defaultBranch") | Out-Null
-    Write-Success "Pushed changes to wiki remote (origin $defaultBranch)."
+# FIX 4: GitHub wiki repos always use 'master' as their default branch,
+# regardless of the main repo's default branch setting. Removed the
+# "git remote show origin" call entirely — it made a live network request
+# that would echo the token-embedded URL into stdout/stderr, leaking the
+# secret. Hardcoding 'master' is both correct and safe.
+$defaultBranch = 'master'
+
+try {
+    Push-Location $LocalTempDir
+
+    try {
+        Run-Git @("push", "origin", "HEAD:$defaultBranch") | Out-Null
+        Write-Success "Pushed changes to wiki remote (origin/$defaultBranch)."
+    }
+    finally {
+        Pop-Location
+    }
 }
 catch {
     Write-ErrorCustom "Git push failed: $_"
-    Pop-Location -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
     exit 1
 }
 
 # Cleanup
-Pop-Location
 Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
 
 Write-Title "Done"

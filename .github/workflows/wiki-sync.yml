@@ -24,20 +24,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 🔍 Debug wiki clone
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $owner = "Achi054"
-          $repo = "Jewelix.Docs"
-          $wikiUrl = "https://$env:GITHUB_TOKEN@github.com/$owner/$repo.wiki.git"
-          
-          Write-Host "Testing wiki clone..."
-          $result = git clone --depth 1 $wikiUrl /tmp/wiki-test 2>&1
-          Write-Host "Exit code: $LASTEXITCODE"
-          Write-Host "Output: $result"
-
       - name: 🔄 Sync WIKI.md to GitHub Wiki
         shell: pwsh
         env:
