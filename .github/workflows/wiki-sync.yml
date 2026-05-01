@@ -39,3 +39,20 @@ jobs:
       - name: ✅ Log sync completion
         if: success()
         run: echo "✅ GitHub Wiki page updated successfully!"
+
+      - name: 🔍 Debug content hashes
+        shell: pwsh
+        run: |
+          Write-Host "=== WIKI.md in repo ==="
+          Get-FileHash WIKI.md -Algorithm SHA256 | Select-Object Hash | Write-Host
+          Get-Content WIKI.md | Write-Host
+
+          # Clone wiki and show what's there
+          git clone --depth 1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Achi054/Jewelix.Docs.wiki.git /tmp/wiki-debug
+          Write-Host "=== Jewelix-wikipedia.md in wiki ==="
+          if (Test-Path /tmp/wiki-debug/Jewelix-wikipedia.md) {
+            Get-FileHash /tmp/wiki-debug/Jewelix-wikipedia.md -Algorithm SHA256 | Select-Object Hash | Write-Host
+            Get-Content /tmp/wiki-debug/Jewelix-wikipedia.md | Write-Host
+          } else {
+            Write-Host "FILE DOES NOT EXIST IN WIKI"
+          }
