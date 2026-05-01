@@ -212,7 +212,7 @@ function Get-WikiApiToken {
             return $json.query.tokens.csrftoken
         }
         else {
-            Write-ErrorCustom "Failed to retrieve CSRF token"
+            Write-Error "Failed to retrieve CSRF token"
             exit 1
         }
     }
@@ -391,15 +391,6 @@ function Main {
     # Success message
     Write-Title "✨ Sync Completed Successfully!"
     Write-Host "Wikipedia page '$WikiPageTitle' has been updated.`n" -ForegroundColor Green
-}
-
-# ============================================================================
-# Error Handling
-# ============================================================================
-
-trap {
-    Write-ErrorCustom "Fatal error: $_"
-    exit 1
 }
 
 # ============================================================================
