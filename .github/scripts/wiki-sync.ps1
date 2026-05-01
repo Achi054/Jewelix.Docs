@@ -57,12 +57,12 @@ function Write-Success {
     Write-Host "✅ $Message" -ForegroundColor Green
 }
 
-function Write-Error-Custom {
+function Write-ErrorCustom {
     param([string]$Message)
     Write-Host "❌ $Message" -ForegroundColor Red
 }
 
-function Write-Warning-Custom {
+function Write-WarningCustom {
     param([string]$Message)
     Write-Host "⚠️  $Message" -ForegroundColor Yellow
 }
@@ -70,6 +70,17 @@ function Write-Warning-Custom {
 function Write-Info {
     param([string]$Message)
     Write-Host "ℹ️  $Message" -ForegroundColor Cyan
+}
+
+function ConvertTo-QueryString {
+    param([hashtable]$Parameters)
+    
+    $pairs = @()
+    foreach ($key in $Parameters.Keys) {
+        $value = $Parameters[$key]
+        $pairs += "$([System.Net.WebUtility]::UrlEncode($key))=$([System.Net.WebUtility]::UrlEncode($value))"
+    }
+    return $pairs -join '&'
 }
 
 # ============================================================================
@@ -81,12 +92,12 @@ function Validate-Prerequisites {
     
     # Check credentials
     if (-not $WikiUsername) {
-        Write-Error-Custom "WIKI_USERNAME environment variable is required"
+        Write-ErrorCustom "WIKI_USERNAME environment variable is required"
         exit 1
     }
     
     if (-not $WikiPassword) {
-        Write-Error-Custom "WIKI_PASSWORD environment variable is required"
+        Write-ErrorCustom "WIKI_PASSWORD environment variable is required"
         exit 1
     }
     
@@ -95,7 +106,7 @@ function Validate-Prerequisites {
     
     # Check WIKI.md exists
     if (-not (Test-Path $WikiFilePath)) {
-        Write-Error-Custom "WIKI.md file not found at: $WikiFilePath"
+        Write-ErrorCustom "WIKI.md file not found at: $WikiFilePath"
         exit 1
     }
     
@@ -176,16 +187,19 @@ function Get-WikiApiToken {
     
     Write-Info "Retrieving CSRF token..."
     
+    $queryParams = @{
+        action = 'query'
+        meta = 'tokens'
+        type = 'csrf'
+        format = 'json'
+    }
+    $body = ConvertTo-QueryString -Parameters $queryParams
+    
     $params = @{
         Uri = $WikiApiUrl
         Method = 'POST'
         ContentType = 'application/x-www-form-urlencoded'
-        Body = @{
-            action = 'query'
-            meta = 'tokens'
-            type = 'csrf'
-            format = 'json'
-        } | ConvertTo-QueryString
+        Body = $body
         WebSession = $Session
     }
     
@@ -198,12 +212,12 @@ function Get-WikiApiToken {
             return $json.query.tokens.csrftoken
         }
         else {
-            Write-Error-Custom "Failed to retrieve CSRF token"
+            Write-ErrorCustom "Failed to retrieve CSRF token"
             exit 1
         }
     }
     catch {
-        Write-Error-Custom "Error retrieving token: $_"
+        Write-ErrorCustom "Error retrieving token: $_"
         exit 1
     }
 }
