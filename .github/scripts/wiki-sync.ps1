@@ -1,400 +1,226 @@
-#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Wiki Sync Script - Converts WIKI.md to MediaWiki format and updates Wikipedia page.
+  Sync local WIKI.md into the GitHub built-in wiki for Achi054/Jewelix.Docs.
 
 .DESCRIPTION
-    This script reads WIKI.md, converts Markdown to MediaWiki format, and updates
-    the corresponding Wikipedia page via the MediaWiki API.
+  Clones the repository wiki (Jewelix.Docs.wiki.git), copies WIKI.md to Home.md,
+  commits and pushes the change. Uses GITHUB_TOKEN for non-interactive push.
 
-.PARAMETERS
-    None (uses environment variables)
+.PARAMETER DryRun
+  If set, shows actions without performing git push.
 
 .EXAMPLE
-    .\wiki-sync.ps1
+  # Run normally
+  pwsh ./sync-wiki-from-wiki-md.ps1
 
-.NOTES
-    Requires:
-    - PowerShell Core 7+ or Windows PowerShell 5.1+
-    - Internet connection for Wikipedia API access
-    - WIKI_USERNAME and WIKI_PASSWORD environment variables
+  # Dry run
+  pwsh ./sync-wiki-from-wiki-md.ps1 -DryRun
 #>
 
-param()
+param(
+    [switch]$DryRun
+)
 
-# Enable strict error handling
+# Strict mode
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-# ============================================================================
+# -----------------------
 # Configuration
-# ============================================================================
-
-$WikiUsername = $env:WIKI_USERNAME
-$WikiPassword = $env:WIKI_PASSWORD
-$WikiPageTitle = $env:WIKI_PAGE_TITLE ?? 'Jewelix'
-$WikiSite = 'https://en.wikipedia.org'
-$WikiApiUrl = "$WikiSite/w/api.php"
-
-# Get the path to WIKI.md
+# -----------------------
+$GitHubOwner = 'Achi054'
+$RepoName = 'Jewelix.Docs'
+$WikiRepoName = "$RepoName.wiki.git"
+$WikiRemoteHttps = "https://github.com/$GitHubOwner/$WikiRepoName"
+$LocalTempDir = Join-Path -Path $env:TEMP -ChildPath ("jewelix-wiki-sync-{0}" -f ([guid]::NewGuid().ToString()))
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommandPath
-$WikiFilePath = Join-Path $ScriptDir '..\..' 'WIKI.md'
-$WikiFilePath = (Resolve-Path $WikiFilePath).Path
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
+# Path to source WIKI.md (adjust if needed)
+$WikiFilePath = Join-Path -Path $ScriptDir -ChildPath 'WIKI.md'
 
-function Write-Title {
-    param([string]$Message)
-    Write-Host "`n$('=' * 60)" -ForegroundColor Cyan
-    Write-Host $Message -ForegroundColor Cyan
-    Write-Host $('=' * 60) -ForegroundColor Cyan
+# Git settings
+$CommitMessage = "Sync WIKI.md → Home.md (automated)"
+$GitUserName = $env:GIT_USER_NAME ?? $env:GITHUB_USER ?? 'jewelix-wiki-sync'
+$GitUserEmail = $env:GIT_USER_EMAIL ?? "$GitUserName@users.noreply.github.com"
+
+# Token for push (optional)
+$GitHubToken = $env:GITHUB_TOKEN
+
+# -----------------------
+# Helper functions
+# -----------------------
+function Write-Title([string]$msg) {
+    Write-Host "`n" ('=' * 60) -ForegroundColor Cyan
+    Write-Host $msg -ForegroundColor Cyan
+    Write-Host ('=' * 60) -ForegroundColor Cyan
 }
 
-function Write-Success {
-    param([string]$Message)
-    Write-Host "✅ $Message" -ForegroundColor Green
+function Write-Success([string]$msg) {
+    Write-Host "✅ $msg" -ForegroundColor Green
 }
 
-function Write-ErrorCustom {
-    param([string]$Message)
-    Write-Host "❌ $Message" -ForegroundColor Red
+function Write-Info([string]$msg) {
+    Write-Host "ℹ️  $msg" -ForegroundColor Cyan
 }
 
-function Write-WarningCustom {
-    param([string]$Message)
-    Write-Host "⚠️  $Message" -ForegroundColor Yellow
+function Write-Warn([string]$msg) {
+    Write-Host "⚠️  $msg" -ForegroundColor Yellow
 }
 
-function Write-Info {
-    param([string]$Message)
-    Write-Host "ℹ️  $Message" -ForegroundColor Cyan
+function Write-ErrorCustom([string]$msg) {
+    Write-Host "❌ $msg" -ForegroundColor Red
 }
 
-function ConvertTo-QueryString {
-    param([hashtable]$Parameters)
-    
-    $pairs = @()
-    foreach ($key in $Parameters.Keys) {
-        $value = $Parameters[$key]
-        $pairs += "$([System.Net.WebUtility]::UrlEncode($key))=$([System.Net.WebUtility]::UrlEncode($value))"
+function Run-Git([string[]]$args) {
+    $git = 'git'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $git
+    $psi.Arguments = ($args -join ' ')
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $stdout = $proc.StandardOutput.ReadToEnd()
+    $stderr = $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    if ($proc.ExitCode -ne 0) {
+        throw "git failed: $stderr"
     }
-    return $pairs -join '&'
+    return $stdout.Trim()
 }
 
-# ============================================================================
+# -----------------------
 # Validation
-# ============================================================================
+# -----------------------
+Write-Title "Jewelix Wiki Sync - Validation"
 
-function Validate-Prerequisites {
-    Write-Title "🔍 Validating Prerequisites"
-    
-    # Check credentials
-    if (-not $WikiUsername) {
-        Write-ErrorCustom "WIKI_USERNAME environment variable is required"
-        exit 1
-    }
-    
-    if (-not $WikiPassword) {
-        Write-ErrorCustom "WIKI_PASSWORD environment variable is required"
-        exit 1
-    }
-    
-    Write-Info "Using Wikipedia username: $WikiUsername"
-    Write-Info "Page title: $WikiPageTitle"
-    
-    # Check WIKI.md exists
-    if (-not (Test-Path $WikiFilePath)) {
-        Write-ErrorCustom "WIKI.md file not found at: $WikiFilePath"
-        exit 1
-    }
-    
-    Write-Success "All prerequisites validated"
+if (-not (Test-Path $WikiFilePath)) {
+    Write-ErrorCustom "WIKI.md not found at path: $WikiFilePath"
+    exit 1
+}
+else {
+    Write-Info "Found WIKI.md at: $WikiFilePath"
 }
 
-# ============================================================================
-# Markdown to MediaWiki Conversion
-# ============================================================================
-
-function ConvertTo-MediaWikiFormat {
-    param([string]$MarkdownContent)
-    
-    Write-Info "Converting Markdown to MediaWiki format..."
-    
-    $content = $MarkdownContent
-    
-    # Headers (# → =, ## → ==, etc.)
-    $content = $content -replace '^### (.*?)$', '=== $1 ===' -eq $true | % { $_ }
-    $content = $content -replace '^## (.*?)$', '== $1 ==' -eq $true | % { $_ }
-    $content = $content -replace '^# (.*?)$', '= $1 =' -eq $true | % { $_ }
-    
-    # Process headers properly for multiline content
-    $lines = @($content -split "`n")
-    $processedLines = @()
-    
-    foreach ($line in $lines) {
-        if ($line -match '^### (.+)$') {
-            $processedLines += "=== $($matches[1]) ==="
-        }
-        elseif ($line -match '^## (.+)$') {
-            $processedLines += "== $($matches[1]) =="
-        }
-        elseif ($line -match '^# (.+)$') {
-            $processedLines += "= $($matches[1]) ="
-        }
-        else {
-            $processedLines += $line
-        }
-    }
-    
-    $content = $processedLines -join "`n"
-    
-    # Bold (**text** → '''text''')
-    $content = $content -replace '\*\*(.*?)\*\*', '''$1'''
-    
-    # Italic (*text* → ''text'', but not ** or **)
-    $content = $content -replace '(?<!\*)\*(.*?)(?!\*)\*', '''$1'''
-    
-    # Inline code (`code` → <code>code</code>)
-    $content = $content -replace '`([^`]+)`', '<code>$1</code>'
-    
-    # Links [text](url) → [url text]
-    $content = $content -replace '\[(.*?)\]\((.*?)\)', '[$2 $1]'
-    
-    # Unordered lists (* → *)
-    $content = $content -replace '^\* ', '* '
-    
-    # Ordered lists (1. → #)
-    $content = $content -replace '^\d+\. ', '# '
-    
-    # Horizontal rules (--- → ----)
-    $content = $content -replace '^---+$', '----'
-    
-    # Blockquotes (> → :)
-    $content = $content -replace '^> ', ': '
-    
-    Write-Success "Markdown to MediaWiki conversion completed"
-    return $content
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-ErrorCustom "git is not installed or not in PATH. Install git and retry."
+    exit 1
 }
 
-# ============================================================================
-# Wikipedia API Functions
-# ============================================================================
-
-function Get-WikiApiToken {
-    param([hashtable]$Session)
-    
-    Write-Info "Retrieving CSRF token..."
-    
-    $queryParams = @{
-        action = 'query'
-        meta = 'tokens'
-        type = 'csrf'
-        format = 'json'
-    }
-    $body = ConvertTo-QueryString -Parameters $queryParams
-    
-    $params = @{
-        Uri = $WikiApiUrl
-        Method = 'POST'
-        ContentType = 'application/x-www-form-urlencoded'
-        Body = $body
-        WebSession = $Session
-    }
-    
-    try {
-        $response = Invoke-WebRequest @params -ErrorAction Stop
-        $json = $response.Content | ConvertFrom-Json
-        
-        if ($json.query.tokens.csrftoken) {
-            Write-Success "CSRF token retrieved"
-            return $json.query.tokens.csrftoken
-        }
-        else {
-            Write-Error "Failed to retrieve CSRF token"
-            exit 1
-        }
-    }
-    catch {
-        Write-ErrorCustom "Error retrieving token: $_"
-        exit 1
-    }
+# -----------------------
+# Prepare local workspace
+# -----------------------
+Write-Title "Preparing workspace"
+try {
+    New-Item -Path $LocalTempDir -ItemType Directory -Force | Out-Null
+    Write-Info "Created temp dir: $LocalTempDir"
+}
+catch {
+    Write-ErrorCustom "Failed to create temp dir: $_"
+    exit 1
 }
 
-function ConvertTo-QueryString {
-    param([hashtable]$Parameters)
-    
-    $pairs = @()
-    foreach ($key in $Parameters.Keys) {
-        $value = $Parameters[$key]
-        $pairs += "$([System.Net.WebUtility]::UrlEncode($key))=$([System.Net.WebUtility]::UrlEncode($value))"
-    }
-    return $pairs -join '&'
+# -----------------------
+# Clone wiki repo
+# -----------------------
+Write-Title "Cloning wiki repository"
+$cloneUrl = $WikiRemoteHttps
+
+# If token provided, embed it for non-interactive push/pull (HTTPS)
+if ($GitHubToken) {
+    # Avoid logging token
+    $cloneUrlWithToken = "https://$($GitHubToken)@github.com/$GitHubOwner/$WikiRepoName"
+    $cloneUrl = $cloneUrlWithToken
+    Write-Info "Using GITHUB_TOKEN for authentication (token not shown)."
+}
+else {
+    Write-Warn "GITHUB_TOKEN not set. You will be prompted for credentials if required."
 }
 
-function Update-WikiPage {
-    param(
-        [string]$Content,
-        [hashtable]$Session,
-        [string]$Token
-    )
-    
-    Write-Info "Updating Wikipedia page: $WikiPageTitle"
-    
-    $editParams = @{
-        action = 'edit'
-        title = $WikiPageTitle
-        text = $Content
-        summary = '🤖 Automated update from GitHub Actions - Syncing WIKI.md'
-        token = $Token
-        format = 'json'
-    } | ConvertTo-QueryString
-    
-    $params = @{
-        Uri = $WikiApiUrl
-        Method = 'POST'
-        ContentType = 'application/x-www-form-urlencoded'
-        Body = $editParams
-        WebSession = $Session
-    }
-    
-    try {
-        $response = Invoke-WebRequest @params -ErrorAction Stop
-        $json = $response.Content | ConvertFrom-Json
-        
-        if ($json.edit.result -eq 'Success') {
-            Write-Success "Successfully updated Wikipedia page: $WikiPageTitle"
-            return $true
-        }
-        else {
-            $error = $json.error.info ?? $json.edit.result
-            Write-ErrorCustom "Failed to update page: $error"
-            exit 1
-        }
-    }
-    catch {
-        Write-ErrorCustom "Error updating Wikipedia page: $_"
-        exit 1
-    }
+try {
+    Run-Git @("clone", "--depth", "1", "--", $cloneUrl, $LocalTempDir) | Out-Null
+    Write-Success "Cloned wiki repo into $LocalTempDir"
+}
+catch {
+    Write-ErrorCustom "Failed to clone wiki repo: $_"
+    Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+    exit 1
 }
 
-# ============================================================================
-# Main Authentication
-# ============================================================================
+# -----------------------
+# Copy WIKI.md to Home.md
+# -----------------------
+Write-Title "Copying WIKI.md → Home.md"
+$HomeMdPath = Join-Path -Path $LocalTempDir -ChildPath 'Home.md'
 
-function Invoke-WikiLogin {
-    param([hashtable]$Session)
-    
-    Write-Info "Authenticating with Wikipedia..."
-    
-    # Get login token
-    $loginTokenParams = @{
-        Uri = $WikiApiUrl
-        Method = 'POST'
-        ContentType = 'application/x-www-form-urlencoded'
-        Body = @{
-            action = 'query'
-            meta = 'tokens'
-            type = 'login'
-            format = 'json'
-        } | ConvertTo-QueryString
-        WebSession = $Session
-    }
-    
-    try {
-        $tokenResponse = Invoke-WebRequest @loginTokenParams -ErrorAction Stop
-        $tokenJson = $tokenResponse.Content | ConvertFrom-Json
-        $loginToken = $tokenJson.query.tokens.logintoken
-        
-        if (-not $loginToken) {
-            Write-ErrorCustom "Failed to retrieve login token"
-            exit 1
-        }
-        
-        # Perform login
-        $loginParams = @{
-            action = 'clientlogin'
-            username = $WikiUsername
-            password = $WikiPassword
-            logintoken = $loginToken
-            loginreturnurl = "$WikiSite/wiki/Main_Page"
-            format = 'json'
-        } | ConvertTo-QueryString
-        
-        $loginResponse = Invoke-WebRequest `
-            -Uri $WikiApiUrl `
-            -Method 'POST' `
-            -ContentType 'application/x-www-form-urlencoded' `
-            -Body $loginParams `
-            -WebSession $Session `
-            -ErrorAction Stop
-        
-        $loginJson = $loginResponse.Content | ConvertFrom-Json
-        
-        if ($loginJson.clientlogin.status -eq 'PASS') {
-            Write-Success "Successfully authenticated as: $WikiUsername"
-            return $true
-        }
-        else {
-            $message = $loginJson.clientlogin.message ?? "Unknown error"
-            Write-ErrorCustom "Login failed: $message"
-            exit 1
-        }
-    }
-    catch {
-        Write-ErrorCustom "Authentication error: $_"
-        exit 1
-    }
+try {
+    Copy-Item -Path $WikiFilePath -Destination $HomeMdPath -Force
+    Write-Success "Copied to $HomeMdPath"
+}
+catch {
+    Write-ErrorCustom "Failed to copy WIKI.md: $_"
+    Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+    exit 1
 }
 
-# ============================================================================
-# Main Execution
-# ============================================================================
+# -----------------------
+# Commit changes
+# -----------------------
+Write-Title "Committing changes"
+try {
+    Push-Location $LocalTempDir
 
-function Main {
-    Write-Title "🌐 Jewelix Wiki Sync - Markdown to Wikipedia (PowerShell)"
-    
-    # Validate prerequisites
-    Validate-Prerequisites
-    
-    # Read WIKI.md
-    Write-Info "Reading Wiki file: $WikiFilePath"
-    try {
-        $wikiContent = Get-Content -Path $WikiFilePath -Raw -Encoding UTF8
-        Write-Success "Read $(($wikiContent | Measure-Object -Character).Characters) characters"
+    # Configure git user for this repo
+    Run-Git @("config", "user.name", "`"$GitUserName`"") | Out-Null
+    Run-Git @("config", "user.email", "`"$GitUserEmail`"") | Out-Null
+
+    # Check for changes
+    $status = Run-Git @("status", "--porcelain")
+    if (-not $status) {
+        Write-Info "No changes detected in wiki. Nothing to commit."
+        Pop-Location
+        if ($DryRun) { Write-Info "Dry run complete." }
+        Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+        exit 0
     }
-    catch {
-        Write-ErrorCustom "Error reading WIKI.md: $_"
-        exit 1
-    }
-    
-    # Convert to MediaWiki format
-    $mediaWikiContent = ConvertTo-MediaWikiFormat -MarkdownContent $wikiContent
-    
-    # Create web session for persistent cookies
-    Write-Info "Establishing Wikipedia connection..."
-    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    
-    # Authenticate
-    Write-Title "🔐 Authentication"
-    Invoke-WikiLogin -Session $session
-    
-    # Get CSRF token
-    Write-Title "🔑 Getting CSRF Token"
-    $token = Get-WikiApiToken -Session $session
-    
-    # Update Wikipedia page
-    Write-Title "📝 Updating Wikipedia"
-    Update-WikiPage -Content $mediaWikiContent -Session $session -Token $token
-    
-    # Success message
-    Write-Title "✨ Sync Completed Successfully!"
-    Write-Host "Wikipedia page '$WikiPageTitle' has been updated.`n" -ForegroundColor Green
+
+    Run-Git @("add", "--", "Home.md") | Out-Null
+    Run-Git @("commit", "-m", "`"$CommitMessage`"") | Out-Null
+    Write-Success "Committed Home.md"
+}
+catch {
+    Write-ErrorCustom "Git commit failed: $_"
+    Pop-Location -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+    exit 1
 }
 
-# ============================================================================
-# Execute
-# ============================================================================
+# -----------------------
+# Push changes
+# -----------------------
+if ($DryRun) {
+    Write-Warn "DryRun enabled — skipping git push."
+    Pop-Location
+    Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+    exit 0
+}
 
-Main
+Write-Title "Pushing to remote"
+try {
+    # If token was embedded in clone URL, remote origin already has token; otherwise use normal push
+    Run-Git @("push", "origin", "HEAD:main") | Out-Null
+    Write-Success "Pushed changes to wiki remote (origin main)."
+}
+catch {
+    Write-ErrorCustom "Git push failed: $_"
+    Pop-Location -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+    exit 1
+}
+
+# Cleanup
+Pop-Location
+Remove-Item -Recurse -Force $LocalTempDir -ErrorAction SilentlyContinue
+
+Write-Title "Done"
+Write-Host "Wiki updated: https://github.com/$GitHubOwner/$RepoName/wiki" -ForegroundColor Green
