@@ -31,10 +31,7 @@ jobs:
         run: |
           $scriptPath = Join-Path '.github' 'scripts' 'wiki-sync.ps1'
           & $scriptPath
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Script exited with code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
+          exit $LASTEXITCODE
 
       - name: ✅ Log sync completion
         if: success()
