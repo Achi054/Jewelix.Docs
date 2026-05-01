@@ -160,7 +160,7 @@ $cloneUrl = $WikiRemoteHttps
 # If token provided, embed it for non-interactive push/pull (HTTPS)
 if ($GitHubToken) {
     # Avoid logging token
-    $cloneUrlWithToken = "https://$($GitHubToken)@github.com/$GitHubOwner/$WikiRepoName"
+    $cloneUrlWithToken = "https://$GitHubToken@github.com/$GitHubOwner/$WikiRepoName"
     $cloneUrl = $cloneUrlWithToken
     Write-Info "Using GITHUB_TOKEN for authentication (token not shown)."
 }
