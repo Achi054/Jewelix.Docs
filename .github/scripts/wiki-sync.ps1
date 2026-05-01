@@ -8,6 +8,10 @@
 
 .PARAMETER DryRun
   If set, shows actions without performing git push.
+
+.EXAMPLE
+  pwsh ./wiki-sync.ps1
+  pwsh ./wiki-sync.ps1 -DryRun
 #>
 
 param(
@@ -30,10 +34,7 @@ $WikiRemoteHttps = "https://github.com/$GitHubOwner/$WikiRepoName"
 $TempRoot = $env:TEMP ?? $env:RUNNER_TEMP ?? $env:GITHUB_WORKSPACE ?? '/tmp'
 
 # Robust script directory: prefer PSScriptRoot, then MyInvocation, then current location
-if ($PSBoundParameters.ContainsKey('PSScriptRoot')) {
-    $ScriptDir = $PSScriptRoot
-}
-elseif ($PSScriptRoot) {
+if ($PSScriptRoot) {
     $ScriptDir = $PSScriptRoot
 }
 elseif ($MyInvocation -and $MyInvocation.MyCommandPath) {
@@ -45,12 +46,15 @@ else {
 
 $LocalTempDir = Join-Path -Path $TempRoot -ChildPath ("jewelix-wiki-sync-{0}" -f ([guid]::NewGuid().ToString()))
 
-# Path to source WIKI.md (try script dir, then workspace root)
-$WikiFilePathCandidates = @(
-    Join-Path -Path $ScriptDir -ChildPath 'WIKI.md',
-    Join-Path -Path $ScriptDir -ChildPath '..\WIKI.md',
-    Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath 'WIKI.md'
-) | ForEach-Object { (Resolve-Path -Path $_ -ErrorAction SilentlyContinue).Path } | Where-Object { $_ }
+# Build explicit candidate paths (strings only)
+$possiblePaths = @(
+    Join-Path -Path $ScriptDir -ChildPath 'WIKI.md'
+    Join-Path -Path $ScriptDir -ChildPath '..\WIKI.md'
+)
+
+if ($env:GITHUB_WORKSPACE) {
+    $possiblePaths += Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath 'WIKI.md'
+}
 
 # Git settings
 $CommitMessage = "Sync WIKI.md → Home.md (automated)"
@@ -89,7 +93,11 @@ function Run-Git([string[]]$args) {
     $git = 'git'
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $git
-    $psi.Arguments = ($args -join ' ')
+    # join args safely: wrap each arg containing spaces in quotes
+    $escapedArgs = $args | ForEach-Object {
+        if ($_ -match '\s') { '"{0}"' -f ($_ -replace '"','\"') } else { $_ }
+    }
+    $psi.Arguments = ($escapedArgs -join ' ')
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
@@ -108,12 +116,20 @@ function Run-Git([string[]]$args) {
 # -----------------------
 Write-Title "Jewelix Wiki Sync - Validation"
 
-if (-not $WikiFilePathCandidates -or $WikiFilePathCandidates.Count -eq 0) {
-    Write-ErrorCustom "WIKI.md not found. Checked: $ScriptDir and GITHUB_WORKSPACE. Provide WIKI.md or set correct path."
+# Resolve to the first existing file
+$WikiFilePath = $possiblePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $WikiFilePath) {
+    Write-ErrorCustom "WIKI.md not found. Checked: $($possiblePaths -join ', ')"
     exit 1
 }
 else {
-    $WikiFilePath = $WikiFilePathCandidates[0]
+    # Optionally get absolute path
+    try {
+        $WikiFilePath = (Resolve-Path -Path $WikiFilePath -ErrorAction Stop).Path
+    } catch {
+        # keep as-is if Resolve-Path fails
+    }
     Write-Info "Using WIKI.md at: $WikiFilePath"
 }
 
@@ -186,8 +202,8 @@ try {
     Push-Location $LocalTempDir
 
     # Configure git user for this repo
-    Run-Git @("config", "user.name", "`"$GitUserName`"") | Out-Null
-    Run-Git @("config", "user.email", "`"$GitUserEmail`"") | Out-Null
+    Run-Git @("config", "user.name", $GitUserName) | Out-Null
+    Run-Git @("config", "user.email", $GitUserEmail) | Out-Null
 
     # Check for changes
     $status = Run-Git @("status", "--porcelain")
@@ -200,7 +216,7 @@ try {
     }
 
     Run-Git @("add", "--", "Home.md") | Out-Null
-    Run-Git @("commit", "-m", "`"$CommitMessage`"") | Out-Null
+    Run-Git @("commit", "-m", $CommitMessage) | Out-Null
     Write-Success "Committed Home.md"
 }
 catch {
@@ -224,12 +240,15 @@ Write-Title "Pushing to remote"
 try {
     # detect remote default branch (if possible)
     $remoteInfo = Run-Git @("remote", "show", "origin")
-    $match = ($remoteInfo -split "`n" | Where-Object { $_ -match 'HEAD branch:' }) -join ''
-    if ($match -and $match -match 'HEAD branch:\s*(\S+)') {
-        $defaultBranch = $matches[1]
-    }
-    else {
-        $defaultBranch = 'main'
+    $defaultBranch = 'main'
+    if ($remoteInfo) {
+        $lines = $remoteInfo -split "`n"
+        foreach ($line in $lines) {
+            if ($line -match 'HEAD branch:\s*(\S+)') {
+                $defaultBranch = $matches[1]
+                break
+            }
+        }
     }
 
     Run-Git @("push", "origin", "HEAD:$defaultBranch") | Out-Null
