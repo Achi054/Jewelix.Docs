@@ -1,4 +1,4 @@
-# 💎 Jewelix Project Wiki
+# 💎 Jewelix Project Wikipedia
 
 A comprehensive guide to the **Jewelix** ecosystem - a modern, full-stack application combining functional design with elegant visual identity.
 
