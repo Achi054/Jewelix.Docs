@@ -1,0 +1,122 @@
+name: 📚 Update Wiki from README Changes
+
+on:
+  repository_dispatch:
+    types: [readme-updated]
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'README.md'
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Source repository slug (e.g. Achi054/Jewelix.Web). Leave blank to use Jewelix.Docs README.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  update-wiki:
+    runs-on: ubuntu-latest
+    name: 📖 Sync README into WIKI.md
+
+    steps:
+      - name: 📥 Checkout Jewelix.Docs
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Resolve source repository
+        id: source
+        run: |
+          case "${{ github.event_name }}" in
+            repository_dispatch)
+              REPO="${{ github.event.client_payload.repository }}"
+              REPO_NAME="${{ github.event.client_payload.repo_name }}"
+              ;;
+            push)
+              REPO="${{ github.repository }}"
+              REPO_NAME="${{ github.event.repository.name }}"
+              ;;
+            workflow_dispatch)
+              if [ -n "${{ github.event.inputs.source_repo }}" ]; then
+                REPO="${{ github.event.inputs.source_repo }}"
+                REPO_NAME="${REPO##*/}"
+              else
+                REPO="${{ github.repository }}"
+                REPO_NAME="${{ github.event.repository.name }}"
+              fi
+              ;;
+          esac
+
+          echo "repo=$REPO"         >> $GITHUB_OUTPUT
+          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Source: $REPO ($REPO_NAME)"
+
+      - name: 📄 Fetch README from source repository
+        env:
+          # For cross-repo access to private repos, store a PAT as JEWELIX_CROSS_REPO_TOKEN.
+          # Falls back to GITHUB_TOKEN for public repos or same-repo access.
+          GH_TOKEN: ${{ secrets.JEWELIX_CROSS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          SOURCE_REPO="${{ steps.source.outputs.repo }}"
+          gh api "repos/$SOURCE_REPO/contents/README.md" --jq '.content' \
+            | base64 -d > /tmp/source-readme.md
+          echo "✅ Fetched README from $SOURCE_REPO ($(wc -l < /tmp/source-readme.md) lines)"
+
+      - name: 🔄 Inject README section into WIKI.md
+        run: |
+          python3 << 'PYEOF'
+          import re, sys
+
+          repo_name = "${{ steps.source.outputs.repo_name }}"
+
+          with open('/tmp/source-readme.md') as f:
+              readme = f.read().strip()
+
+          with open('WIKI.md') as f:
+              wiki = f.read()
+
+          start_marker = f"<!-- README:{repo_name}:START -->"
+          end_marker   = f"<!-- README:{repo_name}:END -->"
+          section      = f"{start_marker}\n\n{readme}\n\n{end_marker}"
+
+          if start_marker in wiki:
+              # Replace the existing block
+              pattern = re.escape(start_marker) + r'.*?' + re.escape(end_marker)
+              wiki = re.sub(pattern, section, wiki, flags=re.DOTALL)
+          else:
+              # First time: ensure the "Repository READMEs" heading exists, then append
+              heading = "\n\n---\n\n## 📄 Repository READMEs\n"
+              if "## 📄 Repository READMEs" not in wiki:
+                  wiki = wiki.rstrip() + heading
+              wiki = wiki.rstrip() + f"\n\n### {repo_name}\n\n{section}\n"
+
+          with open('WIKI.md', 'w') as f:
+              f.write(wiki)
+
+          print(f"✅ WIKI.md updated with README from {repo_name}")
+          PYEOF
+
+      - name: 💾 Commit updated WIKI.md
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet WIKI.md; then
+            echo "✅ WIKI.md is already up to date — nothing to commit."
+            exit 0
+          fi
+
+          git add WIKI.md
+          git commit -m "docs: update wiki with README from ${{ steps.source.outputs.repo_name }}"
+          git push
+          echo "✅ WIKI.md pushed — wiki-sync.yml will propagate to GitHub Wiki."
+
+      - name: ✅ Log completion
+        if: success()
+        run: echo "✅ Wiki updated from ${{ steps.source.outputs.repo_name }} README."

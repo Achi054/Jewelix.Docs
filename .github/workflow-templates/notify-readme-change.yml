@@ -1,0 +1,43 @@
+# ============================================================
+# Template: Notify Jewelix.Docs when this repo's README changes
+# ============================================================
+# Copy this file to .github/workflows/notify-readme-change.yml
+# in any Jewelix repository (Jewelix.Web, Jewelix.Identity,
+# Library.Jewelix.Core, etc.).
+#
+# Required secret in the SOURCE repository:
+#   JEWELIX_DOCS_TOKEN — a GitHub Personal Access Token (classic
+#   or fine-grained) that has `repo` write permission on
+#   Achi054/Jewelix.Docs, so it can fire repository_dispatch.
+# ============================================================
+
+name: 📢 Notify Jewelix.Docs on README Change
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'README.md'
+
+jobs:
+  notify-wiki:
+    runs-on: ubuntu-latest
+    name: 📡 Dispatch README Update to Jewelix.Docs
+
+    steps:
+      - name: 📢 Send repository_dispatch to Jewelix.Docs
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # PAT stored in this repo's secrets
+          token: ${{ secrets.JEWELIX_DOCS_TOKEN }}
+          repository: Achi054/Jewelix.Docs
+          event-type: readme-updated
+          client-payload: |
+            {
+              "repository": "${{ github.repository }}",
+              "repo_name": "${{ github.event.repository.name }}",
+              "ref": "${{ github.ref }}",
+              "sha": "${{ github.sha }}"
+            }
