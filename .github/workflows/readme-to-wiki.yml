@@ -1,0 +1,100 @@
+name: 📄 Sync Repo README to Wiki
+
+# Triggered by other Jewelix repos via repository_dispatch when their README changes.
+# Can also be run manually for any supported repo.
+#
+# Required secret in Jewelix.Docs: GITHUB_TOKEN (built-in, no setup needed)
+# Required secret in SOURCE repos: DOCS_WIKI_TOKEN
+#   — a classic PAT with `repo` scope, stored as a repo/org secret named DOCS_WIKI_TOKEN
+#   — used by the notifier workflow (.github/templates/readme-change-notifier.yml)
+#     to dispatch events here.
+
+on:
+  repository_dispatch:
+    types: [readme-updated]
+
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Source repository name
+        required: true
+        type: choice
+        options:
+          - Jewelix.Web
+          - Jewelix.Identity
+          - Library.Jewelix.Core
+
+permissions:
+  contents: write
+
+jobs:
+  sync-readme-to-wiki:
+    runs-on: ubuntu-latest
+    name: 📖 Push README to GitHub Wiki
+
+    steps:
+      - name: 📥 Checkout Jewelix.Docs
+        uses: actions/checkout@v4
+
+      - name: 🔍 Resolve source repository
+        id: source
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            REPO="${{ github.event.client_payload.repo }}"
+          else
+            REPO="${{ inputs.repo }}"
+          fi
+
+          # Derive a wiki-friendly slug: dots → dashes, e.g. Jewelix.Web → Jewelix-Web
+          SLUG=$(echo "$REPO" | tr '.' '-')
+
+          echo "repo=$REPO"   >> "$GITHUB_OUTPUT"
+          echo "slug=$SLUG"   >> "$GITHUB_OUTPUT"
+
+      - name: 📡 Fetch README from source repo
+        run: |
+          REPO="${{ steps.source.outputs.repo }}"
+          URL="https://raw.githubusercontent.com/Achi054/${REPO}/main/README.md"
+
+          echo "Fetching README from $URL"
+          HTTP_STATUS=$(curl -sL -w "%{http_code}" "$URL" -o fetched-readme.md)
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "❌ README not found at $URL (HTTP $HTTP_STATUS). Aborting."
+            exit 1
+          fi
+
+          echo "✅ README fetched successfully ($(wc -c < fetched-readme.md) bytes)"
+
+      - name: 🔄 Sync README to GitHub Wiki
+        run: |
+          SLUG="${{ steps.source.outputs.slug }}"
+          REPO="${{ steps.source.outputs.repo }}"
+          WIKI_PAGE="${SLUG}-README"
+
+          # Clone the Jewelix.Docs wiki
+          git clone \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Achi054/Jewelix.Docs.wiki.git" \
+            wiki
+
+          cp fetched-readme.md "wiki/${WIKI_PAGE}.md"
+
+          cd wiki
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet; then
+            echo "✅ Wiki already up to date — nothing to push."
+            exit 0
+          fi
+
+          git add "${WIKI_PAGE}.md"
+          git commit -m "docs: sync ${REPO} README → wiki/${WIKI_PAGE}"
+          git push origin HEAD:master
+
+          echo "✅ Wiki page updated: https://github.com/Achi054/Jewelix.Docs/wiki/${WIKI_PAGE}"
+
+      - name: ✅ Log completion
+        if: success()
+        run: |
+          echo "Synced ${{ steps.source.outputs.repo }} README to wiki page ${{ steps.source.outputs.slug }}-README"
